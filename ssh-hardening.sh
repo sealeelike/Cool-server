@@ -39,12 +39,12 @@ confirm() {
   local default="${2:-}"  # 期望值: y、n 或空字符串（不区分大小写）
   local hint
   case "${default,,}" in
-    y) hint="[Y/n]" ;;
-    n) hint="[y/N]" ;;
-    *) hint="(y/n)" ;;
+    y) hint="${CYAN}[${GREEN}${BOLD}Y${RESET}${CYAN}/n]${RESET}" ;;
+    n) hint="${CYAN}[y/${GREEN}${BOLD}N${RESET}${CYAN}]${RESET}" ;;
+    *) hint="${CYAN}(y/n)${RESET}" ;;
   esac
   local answer
-  read -r -p "$(echo -e "  ${YELLOW}${prompt} ${hint}: ${RESET}")" answer
+  read -r -p "$(echo -e "  ${YELLOW}${prompt} ${hint}${YELLOW}: ${RESET}")" answer
   if [[ -z "$answer" ]]; then
     answer="${default}"
   fi
@@ -133,6 +133,40 @@ phase_precheck() {
     val=$(privileged sshd -T 2>/dev/null | grep -i "^${key} " | awk '{print $2}' || echo "未知")
     printf "     %-35s %s\n" "${key}:" "${val}"
   done
+
+  # 6. 已有公钥概览
+  local target_home
+  if [[ "$(id -u)" -eq 0 ]]; then
+    target_home="/root"
+  else
+    target_home="$HOME"
+  fi
+  _show_existing_pubkeys "${target_home}/.ssh/authorized_keys"
+}
+
+# ─────────────────────────────────────────────
+# 显示已有公钥列表
+# ─────────────────────────────────────────────
+_show_existing_pubkeys() {
+  local auth_keys="$1"
+  echo ""
+  info "目标文件 ${auth_keys} 中已有的公钥："
+  if [[ -f "$auth_keys" && -s "$auth_keys" ]]; then
+    local i=1
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" =~ ^# ]] && continue
+      local keytype comment
+      keytype=$(awk '{print $1}' <<< "$line")
+      comment=$(awk '{$1=$2=""; sub(/^[[:space:]]+/,"",$0); print}' <<< "$line")
+      printf "     %d) %-30s %s\n" "$i" "$keytype" "${comment:-<无注释>}"
+      ((i++))
+    done < "$auth_keys"
+    if (( i == 1 )); then
+      echo -e "     （文件存在但无有效公钥行）"
+    fi
+  else
+    echo -e "     （暂无已添加的公钥）"
+  fi
 }
 
 # ─────────────────────────────────────────────
@@ -215,10 +249,38 @@ phase_pubkey() {
   echo -e "${YELLOW}  ─────────────────────────────────────────────${RESET}"
   echo ""
 
-  confirm "公钥登录测试成功了吗？" "y" \
-    || { warn "请先确认公钥登录成功后再继续，脚本已退出"; exit 0; }
+  if ! confirm "公钥登录测试成功了吗？" "y"; then
+    warn "公钥登录测试未成功"
+    if confirm "是否删除刚刚添加的公钥（撤销本次写入）？" "n"; then
+      _remove_pubkey "$pubkey" "$AUTH_KEYS"
+      ok "已从 ${AUTH_KEYS} 中删除刚刚添加的公钥"
+    fi
+    warn "请先确认公钥登录成功后再继续，脚本已退出"
+    exit 0
+  fi
 
   ok "用户已确认公钥登录成功，继续安全加固"
+}
+
+_remove_pubkey() {
+  local pubkey="$1"
+  local auth_keys="$2"
+  local pubkey_material
+  pubkey_material=$(awk '{print $2}' <<< "$pubkey")
+  if [[ -z "$pubkey_material" ]]; then
+    warn "无法提取公钥内容，跳过删除操作"
+    return 1
+  fi
+  local tmpfile
+  tmpfile=$(mktemp)
+  if awk -v mat="$pubkey_material" '$2 != mat' "$auth_keys" > "$tmpfile"; then
+    mv "$tmpfile" "$auth_keys"
+    chmod 600 "$auth_keys"
+  else
+    rm -f "$tmpfile"
+    warn "删除公钥时出错，${auth_keys} 未修改"
+    return 1
+  fi
 }
 
 _enable_pubkey_auth() {
