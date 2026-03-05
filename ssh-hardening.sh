@@ -35,10 +35,20 @@ die() {
 }
 
 confirm() {
-  local prompt="${1:-继续？(y/n): }"
+  local prompt="${1:-继续？}"
+  local default="${2:-}"  # 期望值: y、n 或空字符串（不区分大小写）
+  local hint
+  case "${default,,}" in
+    y) hint="[Y/n]" ;;
+    n) hint="[y/N]" ;;
+    *) hint="(y/n)" ;;
+  esac
   local answer
-  read -r -p "$(echo -e "  ${YELLOW}${prompt}${RESET}")" answer
-  [[ "$answer" =~ ^[Yy]$ ]]
+  read -r -p "$(echo -e "  ${YELLOW}${prompt} ${hint}: ${RESET}")" answer
+  if [[ -z "$answer" ]]; then
+    answer="${default}"
+  fi
+  [[ "${answer,,}" =~ ^y$ ]]
 }
 
 # ─────────────────────────────────────────────
@@ -91,7 +101,7 @@ phase_precheck() {
         ;;
       *)
         warn "当前系统为 ${PRETTY_NAME:-未知}，本脚本针对 Debian/Ubuntu 优化，继续可能出现兼容问题"
-        confirm "仍要继续？(y/n): " || exit 0
+        confirm "仍要继续？" "n" || exit 0
         ;;
     esac
   else
@@ -205,7 +215,7 @@ phase_pubkey() {
   echo -e "${YELLOW}  ─────────────────────────────────────────────${RESET}"
   echo ""
 
-  confirm "公钥登录测试成功了吗？(y/n): " \
+  confirm "公钥登录测试成功了吗？" "y" \
     || { warn "请先确认公钥登录成功后再继续，脚本已退出"; exit 0; }
 
   ok "用户已确认公钥登录成功，继续安全加固"
@@ -368,7 +378,7 @@ phase_finish() {
 
   # 询问是否删除脚本自身
   if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
-    if confirm "是否删除脚本自身 (${BASH_SOURCE[0]})？(y/n): "; then
+    if confirm "是否删除脚本自身 (${BASH_SOURCE[0]})？" "n"; then
       rm -f "${BASH_SOURCE[0]}"
       ok "脚本已删除"
     fi
@@ -394,11 +404,11 @@ BANNER
 
   phase_precheck
   echo ""
-  confirm "预检查完成，开始配置公钥？(y/n): " || exit 0
+  confirm "预检查完成，开始配置公钥？" "y" || exit 0
 
   phase_pubkey
   echo ""
-  confirm "公钥配置完成，开始安全加固（禁用密码/配置 fail2ban）？(y/n): " || exit 0
+  confirm "公钥配置完成，开始安全加固（禁用密码/配置 fail2ban）？" "y" || exit 0
 
   phase_harden
   phase_finish
