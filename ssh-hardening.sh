@@ -39,12 +39,12 @@ confirm() {
   local default="${2:-}"  # 期望值: y、n 或空字符串（不区分大小写）
   local hint
   case "${default,,}" in
-    y) hint="${CYAN}[${GREEN}${BOLD}Y${RESET}${CYAN}/n]${RESET}" ;;
-    n) hint="${CYAN}[y/${GREEN}${BOLD}N${RESET}${CYAN}]${RESET}" ;;
-    *) hint="${CYAN}(y/n)${RESET}" ;;
+    y) hint="[Y/n]" ;;
+    n) hint="[y/N]" ;;
+    *) hint="[y/n]" ;;
   esac
   local answer
-  read -r -p "$(echo -e "  ${YELLOW}${prompt} ${hint}${YELLOW}: ${RESET}")" answer
+  read -r -p "$(echo -e "  ${YELLOW}${prompt} ${hint}: ${RESET}")" answer
   if [[ -z "$answer" ]]; then
     answer="${default}"
   fi
@@ -249,7 +249,12 @@ phase_pubkey() {
   echo -e "${YELLOW}  ─────────────────────────────────────────────${RESET}"
   echo ""
 
-  if ! confirm "公钥登录测试成功了吗？" "y"; then
+  echo -e "  ${CYAN}⚠ 如果您确认公钥登录成功，后续步骤将会：${RESET}"
+  echo -e "  ${CYAN}    1. 禁用密码登录（PasswordAuthentication no）${RESET}"
+  echo -e "  ${CYAN}    2. 安装并配置 fail2ban 防暴力破解${RESET}"
+  echo -e "  ${CYAN}  一旦禁用密码登录，若公钥不可用，您将无法再通过密码重新登录！${RESET}"
+  echo ""
+  if ! confirm "公钥登录测试成功了吗？" "n"; then
     warn "公钥登录测试未成功"
     if confirm "是否删除刚刚添加的公钥（撤销本次写入）？" "n"; then
       _remove_pubkey "$pubkey" "$AUTH_KEYS"
@@ -460,6 +465,24 @@ main() {
   ╚═══════════════════════════════════════════╝
 BANNER
   echo -e "${RESET}"
+
+  echo -e "${YELLOW}${BOLD}  ⚠  重要安全提示 ⚠${RESET}"
+  echo -e "${YELLOW}  ──────────────────────────────────────────────────────${RESET}"
+  echo -e "${YELLOW}  本脚本将修改 SSH 配置并最终禁用密码登录。${RESET}"
+  echo -e "${YELLOW}  在脚本执行的全程，请确保至少有一个已登录的 SSH 连接${RESET}"
+  echo -e "${YELLOW}  保持打开状态，直到脚本完全结束。${RESET}"
+  echo -e "${YELLOW}  如果在禁用密码登录前关闭了所有连接，您可能会被${RESET}"
+  echo -e "${YELLOW}  永久锁在服务器之外，无法再登录！${RESET}"
+  echo -e "${YELLOW}  ──────────────────────────────────────────────────────${RESET}"
+  echo ""
+  echo -e "  ${BOLD}请输入 yes 以确认您已了解上述风险，并将全程保持至少一个 SSH 连接。${RESET}"
+  local ack
+  read -r -p "$(echo -e "  ${BOLD}输入 yes 继续: ${RESET}")" ack
+  if [[ "${ack}" != "yes" ]]; then
+    echo -e "  ${RED}未确认，脚本已退出。${RESET}"
+    exit 1
+  fi
+  echo ""
 
   SSHD_CONF_DIR=""
   F2B_INSTALLED=false
