@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Recommend to set an alias
+
 # Docker 容器管理脚本 - 表格形式 + 交互式管理
 # 显示所有容器的名称、状态、健康检查和端口映射，并提供启动/暂停/停止功能
 
