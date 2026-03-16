@@ -290,7 +290,7 @@ _remove_pubkey() {
 
 _enable_pubkey_auth() {
   if [[ -n "$SSHD_CONF_DIR" ]]; then
-    local conf="${SSHD_CONF_DIR}/10-pubkey.conf"
+    local conf="${SSHD_CONF_DIR}/99-managed-ssh.conf"
     if [[ ! -f "$conf" ]] || ! grep -qE '^\s*PubkeyAuthentication\s+yes' "$conf" 2>/dev/null; then
       echo "PubkeyAuthentication yes" | privileged tee "$conf" >/dev/null
     fi
@@ -373,7 +373,7 @@ phase_harden() {
 
 _write_security_conf() {
   if [[ -n "$SSHD_CONF_DIR" ]]; then
-    privileged tee "${SSHD_CONF_DIR}/20-security.conf" >/dev/null <<'EOF'
+    privileged tee "${SSHD_CONF_DIR}/99-managed-ssh.conf" >/dev/null <<'EOF'
 # 只允许公钥认证
 PubkeyAuthentication yes
 AuthenticationMethods publickey
@@ -387,6 +387,9 @@ PermitEmptyPasswords no
 # 允许 root 但仅公钥
 PermitRootLogin prohibit-password
 EOF
+    # 清理旧版本生成的独立文件（如存在）
+    [[ -f "${SSHD_CONF_DIR}/10-pubkey.conf" ]] && privileged rm -f "${SSHD_CONF_DIR}/10-pubkey.conf"
+    [[ -f "${SSHD_CONF_DIR}/20-security.conf" ]] && privileged rm -f "${SSHD_CONF_DIR}/20-security.conf"
   else
     local cfg=/etc/ssh/sshd_config
     _set_sshd_option "PubkeyAuthentication"            "yes"               "$cfg"
