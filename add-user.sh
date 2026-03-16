@@ -89,6 +89,51 @@ MATCH_BLOCK_ADDED=false
 USER_CREATED=false
 
 # ─────────────────────────────────────────────
+# 辅助：检查 sshd_config.d 的配置文件状态
+# ─────────────────────────────────────────────
+# 要求 sshd_config.d 中最多只存在一个配置文件，且必须是本套件管理的
+# 99-managed-ssh.conf。若存在多个文件或未知文件，则停止执行并给出说明。
+# 背景：Match User 块必须位于整个 SSH 有效配置的末尾。由于 Debian/Ubuntu
+# 的 sshd_config 将 Include 放在文件顶部，include 结束后 sshd_config 本体
+# 的剩余内容会紧接在最后一个 include 文件之后解析，若该文件以开放的 Match
+# 块结尾，sshd_config 的后续全局指令就会被纳入该 Match 块作用域，造成
+# 安全配置失效。因此本脚本始终将 Match User 块追加到 /etc/ssh/sshd_config
+# 末尾，而全局设置则集中写入唯一一个托管文件 99-managed-ssh.conf。
+_check_sshd_conf_state() {
+  local managed="${SSHD_CONF_DIR}/99-managed-ssh.conf"
+  local conf_files=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && conf_files+=("$f")
+  done < <(privileged find "$SSHD_CONF_DIR" -maxdepth 1 -name "*.conf" 2>/dev/null | sort)
+
+  local count=${#conf_files[@]}
+
+  if [[ $count -eq 0 ]]; then
+    info "sshd_config.d 目录为空，将在需要时自动创建 99-managed-ssh.conf"
+    return 0
+  fi
+
+  if [[ $count -eq 1 && -f "$managed" ]]; then
+    ok "发现托管配置文件: 99-managed-ssh.conf"
+    return 0
+  fi
+
+  # 存在多个文件，或唯一文件不是托管文件
+  echo ""
+  fail "sshd_config.d 中存在非预期的配置文件（共 ${count} 个）："
+  for f in "${conf_files[@]}"; do
+    echo "     - $(basename "$f")"
+  done
+  echo ""
+  die "多个 SSH drop-in 配置文件会使最终配置的作用域和顺序存在歧义，无法安全继续。
+  如果以上文件是由旧版 ssh-hardening.sh 生成的（如 10-pubkey.conf、20-security.conf），
+  请重新运行最新版 ssh-hardening.sh，它会自动将这些文件合并为 99-managed-ssh.conf。
+  如果是由旧版 add-user.sh 生成的（如 30-user-*.conf），请手动删除这些文件，
+  Match User 块现在统一追加到 /etc/ssh/sshd_config 末尾，无需独立 conf 文件。
+  整理完毕后重新运行本脚本。"
+}
+
+# ─────────────────────────────────────────────
 # 阶段一：预检查
 # ─────────────────────────────────────────────
 phase_precheck() {
@@ -127,6 +172,7 @@ phase_precheck() {
       && [[ -d /etc/ssh/sshd_config.d ]]; then
     ok "sshd 支持 include 目录 (/etc/ssh/sshd_config.d/)"
     SSHD_CONF_DIR="/etc/ssh/sshd_config.d"
+    _check_sshd_conf_state
   else
     warn "sshd_config 中未找到 Include 指令或目录不存在，将直接修改 /etc/ssh/sshd_config"
     SSHD_CONF_DIR=""
@@ -134,7 +180,7 @@ phase_precheck() {
 
   # 4. 当前 SSH 全局认证配置摘要
   echo ""
-  info "当前 SSH 全局认证配置（本脚本不会改变这些全局设置）："
+  info "当前 SSH 全局认证配置（若 PubkeyAuthentication 未启用，本脚本将自动全局开启）："
   for key in PubkeyAuthentication PasswordAuthentication PermitRootLogin; do
     val=$(privileged sshd -T 2>/dev/null | grep -i "^${key} " | awk '{print $2}' || echo "未知")
     printf "     %-35s %s\n" "${key}:" "${val}"
@@ -179,69 +225,73 @@ phase_create_user() {
     USER_CREATED=true
   fi
 
-  # 2.3 设置密码
-  echo ""
-  info "为用户 ${NEW_USER} 设置登录密码（用于本地登录和 sudo，SSH 登录将只允许公钥）"
-  while true; do
-    local pass1 pass2
-    read -r -s -p "$(echo -e "  ${YELLOW}请输入密码: ${RESET}")" pass1
+  # 2.3 设置密码（仅对新用户；已存在用户跳过，避免意外重置密码）
+  if [[ "$USER_CREATED" == true ]]; then
     echo ""
-    read -r -s -p "$(echo -e "  ${YELLOW}请再次输入密码确认: ${RESET}")" pass2
-    echo ""
-    if [[ -z "$pass1" ]]; then
-      warn "密码不能为空，请重新输入"
-      continue
-    fi
-    if [[ "$pass1" != "$pass2" ]]; then
-      warn "两次输入的密码不一致，请重新输入"
-      continue
-    fi
-    printf '%s:%s\n' "$NEW_USER" "$pass1" | privileged chpasswd
-    ok "用户 ${NEW_USER} 的密码已设置"
-    break
-  done
+    info "为用户 ${NEW_USER} 设置登录密码（用于本地登录和 sudo，SSH 登录将只允许公钥）"
+    while true; do
+      local pass1 pass2
+      read -r -s -p "$(echo -e "  ${YELLOW}请输入密码: ${RESET}")" pass1
+      echo ""
+      read -r -s -p "$(echo -e "  ${YELLOW}请再次输入密码确认: ${RESET}")" pass2
+      echo ""
+      if [[ -z "$pass1" ]]; then
+        warn "密码不能为空，请重新输入"
+        continue
+      fi
+      if [[ "$pass1" != "$pass2" ]]; then
+        warn "两次输入的密码不一致，请重新输入"
+        continue
+      fi
+      printf '%s:%s\n' "$NEW_USER" "$pass1" | privileged chpasswd
+      ok "用户 ${NEW_USER} 的密码已设置"
+      break
+    done
 
-  # 2.4 sudo 权限
-  echo ""
-  info "设置 ${NEW_USER} 的 sudo 权限："
-  echo "     1) 无 sudo 权限"
-  echo "     2) 完整 sudo 权限（执行 sudo 时需要输入密码）"
-  echo "     3) 免密 sudo 权限（执行 sudo 时无需输入密码）"
-  echo ""
-  local sudo_choice
-  while true; do
-    read -r -p "$(echo -e "  ${YELLOW}请选择 [1/2/3]: ${RESET}")" sudo_choice
-    case "$sudo_choice" in
-      1)
-        if groups "$NEW_USER" 2>/dev/null | grep -qw "sudo"; then
-          privileged deluser "$NEW_USER" sudo >/dev/null 2>&1 || true
-        fi
-        if [[ -f "/etc/sudoers.d/${NEW_USER}" ]]; then
-          privileged rm -f "/etc/sudoers.d/${NEW_USER}"
-        fi
-        ok "用户 ${NEW_USER} 无 sudo 权限"
-        break
-        ;;
-      2)
-        privileged usermod -aG sudo "$NEW_USER"
-        if [[ -f "/etc/sudoers.d/${NEW_USER}" ]]; then
-          privileged rm -f "/etc/sudoers.d/${NEW_USER}"
-        fi
-        ok "用户 ${NEW_USER} 已加入 sudo 组（需要密码）"
-        break
-        ;;
-      3)
-        privileged usermod -aG sudo "$NEW_USER"
-        printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$NEW_USER" | privileged tee "/etc/sudoers.d/${NEW_USER}" >/dev/null
-        privileged chmod 440 "/etc/sudoers.d/${NEW_USER}"
-        ok "用户 ${NEW_USER} 已设置免密 sudo"
-        break
-        ;;
-      *)
-        warn "请输入 1、2 或 3"
-        ;;
-    esac
-  done
+    # 2.4 sudo 权限（仅对新用户）
+    echo ""
+    info "设置 ${NEW_USER} 的 sudo 权限："
+    echo "     1) 无 sudo 权限"
+    echo "     2) 完整 sudo 权限（执行 sudo 时需要输入密码）"
+    echo "     3) 免密 sudo 权限（执行 sudo 时无需输入密码）"
+    echo ""
+    local sudo_choice
+    while true; do
+      read -r -p "$(echo -e "  ${YELLOW}请选择 [1/2/3]: ${RESET}")" sudo_choice
+      case "$sudo_choice" in
+        1)
+          if groups "$NEW_USER" 2>/dev/null | grep -qw "sudo"; then
+            privileged deluser "$NEW_USER" sudo >/dev/null 2>&1 || true
+          fi
+          if [[ -f "/etc/sudoers.d/${NEW_USER}" ]]; then
+            privileged rm -f "/etc/sudoers.d/${NEW_USER}"
+          fi
+          ok "用户 ${NEW_USER} 无 sudo 权限"
+          break
+          ;;
+        2)
+          privileged usermod -aG sudo "$NEW_USER"
+          if [[ -f "/etc/sudoers.d/${NEW_USER}" ]]; then
+            privileged rm -f "/etc/sudoers.d/${NEW_USER}"
+          fi
+          ok "用户 ${NEW_USER} 已加入 sudo 组（需要密码）"
+          break
+          ;;
+        3)
+          privileged usermod -aG sudo "$NEW_USER"
+          printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$NEW_USER" | privileged tee "/etc/sudoers.d/${NEW_USER}" >/dev/null
+          privileged chmod 440 "/etc/sudoers.d/${NEW_USER}"
+          ok "用户 ${NEW_USER} 已设置免密 sudo"
+          break
+          ;;
+        *)
+          warn "请输入 1、2 或 3"
+          ;;
+      esac
+    done
+  else
+    info "已存在用户 ${NEW_USER}，跳过密码和 sudo 设置，仅配置 SSH 公钥"
+  fi
 }
 
 # ─────────────────────────────────────────────
@@ -368,10 +418,15 @@ _ensure_pubkey_auth_enabled() {
     return 0
   fi
   if [[ -n "$SSHD_CONF_DIR" ]]; then
-    local conf="${SSHD_CONF_DIR}/10-pubkey.conf"
-    if [[ ! -f "$conf" ]] || ! grep -qE '^\s*PubkeyAuthentication\s+yes' "$conf" 2>/dev/null; then
+    local conf="${SSHD_CONF_DIR}/99-managed-ssh.conf"
+    if [[ -f "$conf" ]]; then
+      if ! grep -qE '^\s*PubkeyAuthentication\s+yes' "$conf" 2>/dev/null; then
+        printf 'PubkeyAuthentication yes\n' | privileged tee -a "$conf" >/dev/null
+        ok "已在 ${conf} 中追加 PubkeyAuthentication yes"
+      fi
+    else
       printf 'PubkeyAuthentication yes\n' | privileged tee "$conf" >/dev/null
-      ok "已在 ${conf} 中启用 PubkeyAuthentication"
+      ok "已创建 ${conf} 并启用 PubkeyAuthentication"
     fi
   else
     _set_sshd_option "PubkeyAuthentication" "yes" /etc/ssh/sshd_config
@@ -383,10 +438,16 @@ _ensure_pubkey_auth_enabled() {
 # ─────────────────────────────────────────────
 # 辅助：为新用户添加 Match User 块（仅禁用该用户的密码登录）
 # ─────────────────────────────────────────────
+# 重要：Match User 块必须追加到 /etc/ssh/sshd_config 末尾，而不能放在
+# sshd_config.d 中的任何 conf 文件里。原因：Debian/Ubuntu 的 sshd_config
+# 将 Include 放在文件顶部，所有 include 的 conf 文件在 sshd_config 本体
+# 的其余内容之前被处理；若某个 conf 文件以开放的 Match 块结尾，sshd_config
+# 后续的全局指令（如 PasswordAuthentication yes）会被纳入该 Match 的作用域，
+# 导致安全配置意外失效。将 Match 块追加到 sshd_config 末尾是唯一能保证其
+# 位于所有有效配置最后的方法。
 _add_user_match_block() {
   local begin_marker="### BEGIN add-user: ${NEW_USER} ###"
   local end_marker="### END add-user: ${NEW_USER} ###"
-  # 注：Match 块必须位于配置文件末尾（其后不能跟全局指令）
   # AuthenticationMethods 与 PasswordAuthentication 均可在 Match 块中使用
   local match_content
   match_content="${begin_marker}
@@ -396,24 +457,13 @@ Match User ${NEW_USER}
     PasswordAuthentication no
 ${end_marker}"
 
-  if [[ -n "$SSHD_CONF_DIR" ]]; then
-    local conf="${SSHD_CONF_DIR}/30-user-${NEW_USER}.conf"
-    if [[ -f "$conf" ]] && grep -qF "$begin_marker" "$conf" 2>/dev/null; then
-      warn "用户 ${NEW_USER} 的 SSH 限制配置已存在于 ${conf}，跳过写入"
-    else
-      printf '%s\n' "$match_content" | privileged tee "$conf" >/dev/null
-      ok "已写入 ${conf}（仅限 ${NEW_USER} 使用公钥 SSH 登录）"
-      MATCH_BLOCK_ADDED=true
-    fi
+  local cfg=/etc/ssh/sshd_config
+  if privileged grep -qF "$begin_marker" "$cfg" 2>/dev/null; then
+    warn "sshd_config 中已存在 ${NEW_USER} 的 Match User 块，跳过写入"
   else
-    local cfg=/etc/ssh/sshd_config
-    if privileged grep -qF "$begin_marker" "$cfg" 2>/dev/null; then
-      warn "sshd_config 中已存在 ${NEW_USER} 的 Match User 块，跳过写入"
-    else
-      printf '\n%s\n' "$match_content" | privileged tee -a "$cfg" >/dev/null
-      ok "已在 /etc/ssh/sshd_config 末尾追加 Match User ${NEW_USER} 块"
-      MATCH_BLOCK_ADDED=true
-    fi
+    printf '\n%s\n' "$match_content" | privileged tee -a "$cfg" >/dev/null
+    ok "已在 /etc/ssh/sshd_config 末尾追加 Match User ${NEW_USER} 块"
+    MATCH_BLOCK_ADDED=true
   fi
   privileged sshd -t || die "sshd 配置检查失败，请手动排查"
 }
@@ -448,26 +498,18 @@ _remove_pubkey() {
 # 辅助：删除 Match User 块
 # ─────────────────────────────────────────────
 _remove_match_block() {
-  if [[ -n "$SSHD_CONF_DIR" ]]; then
-    local conf="${SSHD_CONF_DIR}/30-user-${NEW_USER}.conf"
-    if [[ -f "$conf" ]]; then
-      privileged rm -f "$conf"
-      ok "已删除 ${conf}"
-    fi
-  else
-    local cfg=/etc/ssh/sshd_config
-    local begin_marker="### BEGIN add-user: ${NEW_USER} ###"
-    local end_marker="### END add-user: ${NEW_USER} ###"
-    local tmpfile
-    tmpfile=$(mktemp)
-    privileged awk \
-      -v begin="$begin_marker" \
-      -v end="$end_marker" \
-      '$0 == begin { skip=1; next } $0 == end { skip=0; next } !skip { print }' \
-      "$cfg" > "$tmpfile"
-    privileged mv "$tmpfile" "$cfg"
-    ok "已从 /etc/ssh/sshd_config 中删除 Match User ${NEW_USER} 块"
-  fi
+  local cfg=/etc/ssh/sshd_config
+  local begin_marker="### BEGIN add-user: ${NEW_USER} ###"
+  local end_marker="### END add-user: ${NEW_USER} ###"
+  local tmpfile
+  tmpfile=$(mktemp)
+  privileged awk \
+    -v begin="$begin_marker" \
+    -v end="$end_marker" \
+    '$0 == begin { skip=1; next } $0 == end { skip=0; next } !skip { print }' \
+    "$cfg" > "$tmpfile"
+  privileged mv "$tmpfile" "$cfg"
+  ok "已从 /etc/ssh/sshd_config 中删除 Match User ${NEW_USER} 块"
 }
 
 # ─────────────────────────────────────────────
@@ -563,7 +605,8 @@ phase_finish() {
   echo -e "  ✔ SSH 登录: 仅公钥（${NEW_USER} 的密码 SSH 登录已禁用）"
   echo -e "  ✔ 已有用户 SSH 配置不受影响"
   echo ""
-  info "全局 SSH 设置未被修改，仅通过 Match User 块对 ${NEW_USER} 单独限制"
+  info "通过 Match User 块对 ${NEW_USER} 单独限制密码登录，其他用户不受影响"
+  info "全局设置：PubkeyAuthentication yes 已确保启用；其他全局 SSH 配置项未被修改"
   echo ""
 
   # 询问是否删除脚本自身（不适用于通过 bash <(curl ...) 执行的情况）
@@ -592,8 +635,8 @@ BANNER
   echo -e "${YELLOW}  ──────────────────────────────────────────────────────${RESET}"
   echo -e "${YELLOW}  本脚本将创建新用户并为其配置 SSH 公钥登录。${RESET}"
   echo -e "${YELLOW}  新用户将被限制为仅允许公钥方式 SSH 登录（通过 Match User 块）。${RESET}"
-  echo -e "${YELLOW}  本脚本不会修改任何全局 SSH 配置，${RESET}"
-  echo -e "${YELLOW}  已有用户的登录方式完全不受影响。${RESET}"
+  echo -e "${YELLOW}  若 PubkeyAuthentication 尚未全局启用，本脚本将自动开启，${RESET}"
+  echo -e "${YELLOW}  其他全局 SSH 配置不会被修改，已有用户的登录方式完全不受影响。${RESET}"
   echo -e "${RED}  建议您在执行期间保持当前 SSH 连接处于打开状态。${RESET}"
   echo -e "${YELLOW}  ──────────────────────────────────────────────────────${RESET}"
   echo ""

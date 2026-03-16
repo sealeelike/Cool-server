@@ -49,7 +49,7 @@ Fully interactive, one-command:
 - Lets you choose the sudo level: none, full (with password), or passwordless.
 - Prompts you to paste the user's SSH public key and validates it before writing it.
 - Adds a `Match User` block that **only** restricts that specific user to pubkey-only SSH login.  
-  **No global SSH settings are changed — existing users are completely unaffected.**
+  If `PubkeyAuthentication` is not already globally enabled, the script enables it — no other global SSH settings are changed, and **existing users are completely unaffected.**
 - Restarts SSH and pauses so you can verify that key-based login works.
 - If the test fails, offers to roll back: remove the key, remove the `Match User` block, and/or delete the user.
 
