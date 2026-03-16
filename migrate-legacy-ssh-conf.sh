@@ -10,6 +10,10 @@
 #
 # If the host was set up with the newer scripts already, do not run this file.
 # New installs should use ssh-hardening.sh directly and will not need this migration.
+
+#
+# bash <(curl -sSL https://raw.githubusercontent.com/sealeelike/Cool-server/main/migrate-legacy-ssh-conf.sh)
+#
 set -euo pipefail
 
 RED='\033[0;31m'
