@@ -39,6 +39,40 @@ Requirements: Debian or Ubuntu, `sudo`/`root`, `openssh-server` already running.
 
 ---
 
+### `add-user.sh`
+
+The "sequel" to `ssh-hardening.sh` — run this after you have hardened SSH on your VPS to add a new non-root user safely.  
+Fully interactive, one-command:
+
+- Prompts for the new username, validates it, and creates the account.
+- Sets the user's login password (used for local login and `sudo`, **not** for SSH).
+- Lets you choose the sudo level: none, full (with password), or passwordless.
+- Prompts you to paste the user's SSH public key and validates it before writing it.
+- Adds a `Match User` block that **only** restricts that specific user to pubkey-only SSH login.  
+  **No global SSH settings are changed — existing users are completely unaffected.**
+- Restarts SSH and pauses so you can verify that key-based login works.
+- If the test fails, offers to roll back: remove the key, remove the `Match User` block, and/or delete the user.
+
+#### Quick deploy
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/sealeelike/Cool-server/main/add-user.sh)
+```
+
+> **Note:** Run this command directly in your terminal — do not pipe through a shell without a TTY.
+
+Alternatively, download and run locally:
+
+```bash
+curl -sSLO https://raw.githubusercontent.com/sealeelike/Cool-server/main/add-user.sh
+chmod +x add-user.sh
+./add-user.sh
+```
+
+Requirements: Debian or Ubuntu, `sudo`/`root`, `openssh-server` already running.
+
+---
+
 ### `ssh-public-key.md`
 
 The inspiration behind `ssh-hardening.sh`.  
