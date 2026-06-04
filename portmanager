@@ -1,0 +1,232 @@
+#!/bin/sh
+set -eu
+
+list_ports() {
+  ss -H -lntp | awk '
+    {
+      addr=$4
+      port=addr
+      sub(/^.*:/, "", port)
+      if (addr ~ /^127\./ || addr ~ /^\[::1\]/ || addr ~ /^::1/) {
+        next
+      }
+      proc="-"
+      if (match($0, /users:\(\("[^"]+"/)) {
+        proc=substr($0, RSTART, RLENGTH)
+        sub(/^users:\(\("/, "", proc)
+        sub(/"$/, "", proc)
+      }
+      if (port ~ /^[0-9]+$/) print port, proc
+    }
+  ' | awk '
+    {
+      port=$1
+      proc=$2
+      if (!(port in seen)) {
+        seen[port]=1
+        ports[++count]=port
+        proc_by_port[port]=proc
+      }
+      if (proc_by_port[port] == "-" && proc != "-") {
+        proc_by_port[port]=proc
+      }
+    }
+    END {
+      for (i = 1; i <= count; i++) {
+        port=ports[i]
+        print port, proc_by_port[port]
+      }
+    }
+  ' | sort -n -k1,1
+}
+
+list_drop_rules() {
+  iptables -S INPUT | awk '
+    /-p tcp/ && /--dport [0-9]+/ && /-j DROP/ {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "--dport") print $(i + 1)
+      }
+    }
+  ' | sort -n -u
+}
+
+is_drop() {
+  iptables -C INPUT -p tcp --dport "$1" -j DROP 2>/dev/null
+}
+
+port_details() {
+  port=$1
+  listen_tmp=$(mktemp)
+  list_ports > "$listen_tmp"
+  proc=$(awk -v p="$port" '$1 == p {print $2; found=1; exit} END {if (!found) print "-"}' "$listen_tmp")
+  rm -f "$listen_tmp"
+
+  source=RULE
+  if [ "$proc" != "-" ]; then
+    source=LISTEN
+  fi
+
+  status=OPEN
+  if is_drop "$port"; then
+    status=DROP
+  fi
+
+  printf "%s %s %s\n" "$status" "$source" "$proc"
+}
+
+print_table() {
+  listen_tmp=$(mktemp)
+  rules_tmp=$(mktemp)
+  all_tmp=$(mktemp)
+  list_ports > "$listen_tmp"
+  list_drop_rules > "$rules_tmp"
+  {
+    awk '{print $1}' "$listen_tmp"
+    cat "$rules_tmp"
+  } | sort -n -u > "$all_tmp"
+
+  green=$(printf '\033[32m')
+  red=$(printf '\033[31m')
+  reset=$(printf '\033[0m')
+
+  printf "%-4s %-8s %-10s %-8s %s\n" "NO" "PORT" "FIREWALL" "ENTRY" "PROCESS"
+  printf "%-4s %-8s %-10s %-8s %s\n" "--" "----" "--------" "-----" "-------"
+  n=1
+  while read -r port; do
+    [ -n "$port" ] || continue
+    proc=$(awk -v p="$port" '$1 == p {print $2; found=1; exit} END {if (!found) print "-"}' "$listen_tmp")
+    source=RULE
+    if [ "$proc" != "-" ]; then
+      source=LISTEN
+    fi
+    status_text=OPEN
+    status_color=$green
+    if is_drop "$port"; then
+      status_text=DROP
+      status_color=$red
+    fi
+    printf "%-4s %-8s %b%-10s%b %-8s %s\n" "$n" "$port" "$status_color" "$status_text" "$reset" "$source" "$proc"
+    n=$((n + 1))
+  done < "$all_tmp"
+  rm -f "$listen_tmp" "$rules_tmp" "$all_tmp"
+}
+
+port_by_selection() {
+  sel=$1
+  if ! echo "$sel" | grep -Eq '^[0-9]+$'; then
+    return 1
+  fi
+
+  tmp=$(mktemp)
+  {
+    list_ports | awk '{print $1}'
+    list_drop_rules
+  } | sort -n -u > "$tmp"
+  count=$(wc -l < "$tmp" | tr -d " ")
+  if [ "$sel" -ge 1 ] && [ "$sel" -le "$count" ]; then
+    sed -n "${sel}p" "$tmp"
+  else
+    printf "%s" "$sel"
+  fi
+  rm -f "$tmp"
+}
+
+remove_drop() {
+  port=$1
+  while iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; do
+    iptables -D INPUT -p tcp --dport "$port" -j DROP
+  done
+}
+
+add_drop() {
+  port=$1
+  iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null || \
+    iptables -I INPUT 1 -p tcp --dport "$port" -j DROP
+}
+
+while :; do
+  print_table
+  printf "\nAction:\n"
+  printf "  1) open\n"
+  printf "  2) drop\n"
+  printf "  0) exit\n"
+  printf "Select action [0-2/open/drop]: "
+  read -r action_input || exit 0
+
+  case "$action_input" in
+    1|open|o) action=open ;;
+    2|drop|d) action=drop ;;
+    0|q|quit|exit) exit 0 ;;
+    *) echo "unrecognized action, returning to action menu"; continue ;;
+  esac
+
+  while :; do
+    printf "\nSelect target:\n"
+    printf "  0) back\n"
+    printf "Select NO or port: "
+    read -r sel || break
+
+    case "$sel" in
+      0) break ;;
+      "") echo "empty selection, returning to action menu"; break ;;
+    esac
+
+    if ! port=$(port_by_selection "$sel"); then
+      echo "unrecognized target, returning to action menu"
+      break
+    fi
+    if ! echo "$port" | grep -Eq '^[0-9]+$'; then
+      echo "invalid port, returning to action menu"
+      break
+    fi
+
+    details=$(port_details "$port")
+current_status=$(printf "%s" "$details" | awk '{print $1}')
+current_source=$(printf "%s" "$details" | awk '{print $2}')
+current_process=$(printf "%s" "$details" | cut -d " " -f 3-)
+
+    printf "\nPending operation:\n"
+    printf "  input:   %s\n" "$sel"
+    printf "  action:  %s\n" "$action"
+    printf "  port:    tcp/%s\n" "$port"
+    printf "  firewall: %s\n" "$current_status"
+    printf "  entry:    %s\n" "$current_source"
+    printf "  process:  %s\n" "$current_process"
+    printf "\nConfirm:\n"
+    printf "  y) continue\n"
+    printf "  0) back\n"
+    printf "  Enter) cancel\n"
+    printf "Type y to continue [y/N]: "
+    read -r confirm || continue
+    case "$confirm" in
+      y|Y) ;;
+      0|"") echo "cancelled, returning to target menu"; continue ;;
+      *) echo "unrecognized confirmation, returning to target menu"; continue ;;
+    esac
+
+    if [ "$action" = "drop" ]; then
+      current_ssh_port=""
+      if [ -n "${SSH_CONNECTION:-}" ]; then
+        current_ssh_port=$(printf "%s" "$SSH_CONNECTION" | awk '{print $4}')
+      fi
+      if [ "$port" = "$current_ssh_port" ]; then
+        printf "This looks like your current SSH port (%s). Type YES to drop it, or 0 to back: " "$port"
+        read -r ssh_confirm || continue
+        case "$ssh_confirm" in
+          YES) ;;
+          0) echo "cancelled, returning to target menu"; continue ;;
+          *) echo "cancelled, returning to target menu"; continue ;;
+        esac
+      fi
+      add_drop "$port"
+      echo "dropped tcp/$port"
+    else
+      remove_drop "$port"
+      echo "opened tcp/$port"
+    fi
+
+    printf "\nUpdated table:\n"
+    print_table
+    printf "\n"
+  done
+done
