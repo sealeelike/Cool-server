@@ -105,3 +105,11 @@ chmod +x tmux-menu.sh
 ```
 
 Requirements: `tmux` must be installed (`apt-get install -y tmux`).
+
+---
+
+### `portmanager`
+
+```
+curl -fsSL https://raw.githubusercontent.com/sealeelike/Cool-server/refs/heads/main/portmanager -o /usr/local/sbin/portctl && chmod 750 /usr/local/sbin/portctl && { grep -q "alias portmanager=" /root/.bashrc 2>/dev/null || printf "\n# Port firewall manager\nalias portmanager='/usr/local/sbin/portctl'\n" >> /root/.bashrc; } && . /root/.bashrc && alias portmanager
+```
