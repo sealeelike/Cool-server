@@ -69,23 +69,23 @@ cat <<EOF
   Requires iperf3 on Windows → https://files.budman.pw/
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # download speed  (server → client, single stream)
-  iperf3 -c $PUBLIC_IP -p $PORT -R
+# download speed  (server → client, single stream)
+iperf3 -c $PUBLIC_IP -p $PORT -R
 
-  # download speed  (server → client, 4 parallel streams — more accurate on fast links)
-  iperf3 -c $PUBLIC_IP -p $PORT -R -P 4
+# download speed  (server → client, 4 parallel streams — more accurate on fast links)
+iperf3 -c $PUBLIC_IP -p $PORT -R -P 4
 
-  # upload speed    (client → server, 4 parallel streams)
-  iperf3 -c $PUBLIC_IP -p $PORT -P 4
+# upload speed    (client → server, 4 parallel streams)
+iperf3 -c $PUBLIC_IP -p $PORT -P 4
 
-  # bidirectional   (download + upload simultaneously, requires iperf3 >= 3.7)
-  iperf3 -c $PUBLIC_IP -p $PORT --bidir -P 4
+# bidirectional   (download + upload simultaneously, requires iperf3 >= 3.7)
+iperf3 -c $PUBLIC_IP -p $PORT --bidir -P 4
 
-  # UDP jitter & packet loss  (download, target 5 Mbps — adjust -b as needed)
-  iperf3 -c $PUBLIC_IP -p $PORT -R -u -b 5M
+# UDP jitter & packet loss  (download, target 5 Mbps — adjust -b as needed)
+iperf3 -c $PUBLIC_IP -p $PORT -R -u -b 5M
 
-  # longer test     (30 s download, 4 streams — better average on unstable lines)
-  iperf3 -c $PUBLIC_IP -p $PORT -R -P 4 -t 30
+# longer test     (30 s download, 4 streams — better average on unstable lines)
+iperf3 -c $PUBLIC_IP -p $PORT -R -P 4 -t 30
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
