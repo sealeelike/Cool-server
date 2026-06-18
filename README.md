@@ -119,3 +119,9 @@ curl -fsSL https://raw.githubusercontent.com/sealeelike/Cool-server/refs/heads/m
 ```
 bash <(curl -sL https://raw.githubusercontent.com/sealeelike/Cool-server/main/iperf3-server.sh)
 ```
+
+### Nezha-agent Privilege-Drop Installer
+
+```
+curl -fsSL https://raw.githubusercontent.com/sealeelike/Cool-server/main/install-agent-hardened.sh | bash
+```
