@@ -76,8 +76,8 @@ echo "[✓] iperf3 server started  PID=$IPERF_PID  port=$PORT"
 print_pair() {
     local args="$1"
 
-    [[ -n "$PUBLIC_IPV4" ]] && echo "  IPv4: iperf3 -4 -c $PUBLIC_IPV4 -p $PORT $args"
-    [[ -n "$PUBLIC_IPV6" ]] && echo "  IPv6: iperf3 -6 -c $PUBLIC_IPV6 -p $PORT $args"
+    [[ -n "$PUBLIC_IPV4" ]] && printf 'iperf3 -4 -c %s -p %s %s\n' "$PUBLIC_IPV4" "$PORT" "$args"
+    [[ -n "$PUBLIC_IPV6" ]] && printf 'iperf3 -6 -c %s -p %s %s\n' "$PUBLIC_IPV6" "$PORT" "$args"
 }
 
 cat <<EOF
