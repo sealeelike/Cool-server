@@ -31,6 +31,19 @@ info() { printf "${YELLOW}[→] %s${PLAIN}\n" "$*"; }
 # ── 必须 root ─────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || { err "请以 root 身份运行"; exit 1; }
 
+# ── 依赖检查 ──────────────────────────────────────────────────
+if ! command -v unzip >/dev/null 2>&1; then
+    info "未找到 unzip，正在安装..."
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y -q unzip
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q unzip
+    else
+        err "无法自动安装 unzip，请手动安装后重试"; exit 1
+    fi
+    ok "unzip 已安装"
+fi
+
 # ── 架构检测 ──────────────────────────────────────────────────
 detect_arch() {
     case $(uname -m) in
