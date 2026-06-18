@@ -19,10 +19,11 @@ if ! command -v iperf3 &>/dev/null; then
 fi
 
 # ─── get public ip ────────────────────────────────────────────────────────────
-PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://ip.sb\
+PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://api.ipify.org \
+           || curl -4 -sf --max-time 5 https://ip.sb \
+           || curl -4 -sf --max-time 5 https://icanhazip.com \
+           || curl -4 -sf --max-time 5 https://ifconfig.me \
            || true)
-
-echo"yes"
 
 PUBLIC_IPV6=$(curl -6 -sf --max-time 5 https://api6.ipify.org \
            || curl -6 -sf --max-time 5 https://ip.sb \
@@ -72,43 +73,47 @@ trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IP
 echo "[✓] iperf3 server started  PID=$IPERF_PID  port=$PORT"
 
 # ─── print windows client commands ───────────────────────────────────────────
-print_commands() {
-    local label="$1"
-    local ip="$2"
-    local flag="$3"
+print_pair() {
+    local args="$1"
 
-    cat <<EOF
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  $label test commands for Windows PowerShell
-  Requires iperf3 on Windows → https://files.budman.pw/
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# download speed  (server → client, single stream)
-iperf3 $flag -c $ip -p $PORT -R
-
-# download speed  (server → client, 4 parallel streams — more accurate on fast links)
-iperf3 $flag -c $ip -p $PORT -R -P 4
-
-# upload speed    (client → server, 4 parallel streams)
-iperf3 $flag -c $ip -p $PORT -P 4
-
-# bidirectional   (download + upload simultaneously, requires iperf3 >= 3.7)
-iperf3 $flag -c $ip -p $PORT --bidir -P 4
-
-# UDP jitter & packet loss  (download, target 5 Mbps — adjust -b as needed)
-iperf3 $flag -c $ip -p $PORT -R -u -b 5M
-
-# longer test     (30 s download, 4 streams — better average on unstable lines)
-iperf3 $flag -c $ip -p $PORT -R -P 4 -t 30
-
-EOF
+    [[ -n "$PUBLIC_IPV4" ]] && echo "  IPv4: iperf3 -4 -c $PUBLIC_IPV4 -p $PORT $args"
+    [[ -n "$PUBLIC_IPV6" ]] && echo "  IPv6: iperf3 -6 -c $PUBLIC_IPV6 -p $PORT $args"
 }
 
-[[ -n "$PUBLIC_IPV4" ]] && print_commands "IPv4" "$PUBLIC_IPV4" "-4"
-[[ -n "$PUBLIC_IPV6" ]] && print_commands "IPv6" "$PUBLIC_IPV6" "-6"
+cat <<EOF
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Windows PowerShell commands
+  Requires iperf3 on Windows → https://files.budman.pw/
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+
+echo
+echo "# download speed  (server → client, single stream)"
+print_pair "-R"
+
+echo
+echo "# download speed  (server → client, 4 parallel streams — more accurate on fast links)"
+print_pair "-R -P 4"
+
+echo
+echo "# upload speed    (client → server, 4 parallel streams)"
+print_pair "-P 4"
+
+echo
+echo "# bidirectional   (download + upload simultaneously, requires iperf3 >= 3.7)"
+print_pair "--bidir -P 4"
+
+echo
+echo "# UDP jitter & packet loss  (download, target 5 Mbps — adjust -b as needed)"
+print_pair "-R -u -b 5M"
+
+echo
+echo "# longer test     (30 s download, 4 streams — better average on unstable lines)"
+print_pair "-R -P 4 -t 30"
 
 cat <<EOF
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 EOF
