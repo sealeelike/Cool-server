@@ -19,10 +19,7 @@ if ! command -v iperf3 &>/dev/null; then
 fi
 
 # ─── get public ip ────────────────────────────────────────────────────────────
-PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://api.ipify.org \
-           || curl -4 -sf --max-time 5 https://ip.sb \
-           || curl -4 -sf --max-time 5 https://icanhazip.com \
-           || curl -4 -sf --max-time 5 https://ifconfig.me \
+PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://ip.sb\
            || true)
 
 PUBLIC_IPV6=$(curl -6 -sf --max-time 5 https://api6.ipify.org \
