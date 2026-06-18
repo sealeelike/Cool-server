@@ -19,11 +19,18 @@ if ! command -v iperf3 &>/dev/null; then
 fi
 
 # ─── get public ip ────────────────────────────────────────────────────────────
-PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me \
-         || curl -sf --max-time 5 https://api.ipify.org \
-         || curl -sf --max-time 5 https://ipecho.net/plain)
+PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://api.ipify.org \
+           || curl -4 -sf --max-time 5 https://ifconfig.me \
+           || true)
 
-if [[ -z "$PUBLIC_IP" ]]; then
+PUBLIC_IPV6=$(curl -6 -sf --max-time 5 https://api6.ipify.org \
+           || curl -6 -sf --max-time 5 https://ifconfig.me \
+           || true)
+
+PUBLIC_IPV4=$(echo "$PUBLIC_IPV4" | tr -d '[:space:]')
+PUBLIC_IPV6=$(echo "$PUBLIC_IPV6" | tr -d '[:space:]')
+
+if [[ -z "$PUBLIC_IPV4" && -z "$PUBLIC_IPV6" ]]; then
     echo "[!] Could not detect public IP." >&2
     exit 1
 fi
@@ -57,36 +64,48 @@ pkill -x iperf3 &>/dev/null || true
 iperf3 -s -p "$PORT" &
 IPERF_PID=$!
 
-trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IPERF_PID 2>/dev/null; echo "[✓] iperf3 stopped."; exit 0' INT TERM
+trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IPERF_PID 2>/dev/null; echo "[✓] iperf3 stopped."; exit 0' INT TERM HUP
 
 echo "[✓] iperf3 server started  PID=$IPERF_PID  port=$PORT"
 
 # ─── print windows client commands ───────────────────────────────────────────
-cat <<EOF
+print_commands() {
+    local label="$1"
+    local ip="$2"
+    local flag="$3"
+
+    cat <<EOF
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Run any of the following commands in Windows PowerShell:
+  $label test commands for Windows PowerShell
   Requires iperf3 on Windows → https://files.budman.pw/
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # download speed  (server → client, single stream)
-iperf3 -c $PUBLIC_IP -p $PORT -R
+iperf3 $flag -c $ip -p $PORT -R
 
 # download speed  (server → client, 4 parallel streams — more accurate on fast links)
-iperf3 -c $PUBLIC_IP -p $PORT -R -P 4
+iperf3 $flag -c $ip -p $PORT -R -P 4
 
 # upload speed    (client → server, 4 parallel streams)
-iperf3 -c $PUBLIC_IP -p $PORT -P 4
+iperf3 $flag -c $ip -p $PORT -P 4
 
 # bidirectional   (download + upload simultaneously, requires iperf3 >= 3.7)
-iperf3 -c $PUBLIC_IP -p $PORT --bidir -P 4
+iperf3 $flag -c $ip -p $PORT --bidir -P 4
 
 # UDP jitter & packet loss  (download, target 5 Mbps — adjust -b as needed)
-iperf3 -c $PUBLIC_IP -p $PORT -R -u -b 5M
+iperf3 $flag -c $ip -p $PORT -R -u -b 5M
 
 # longer test     (30 s download, 4 streams — better average on unstable lines)
-iperf3 -c $PUBLIC_IP -p $PORT -R -P 4 -t 30
+iperf3 $flag -c $ip -p $PORT -R -P 4 -t 30
 
+EOF
+}
+
+[[ -n "$PUBLIC_IPV4" ]] && print_commands "IPv4" "$PUBLIC_IPV4" "-4"
+[[ -n "$PUBLIC_IPV6" ]] && print_commands "IPv6" "$PUBLIC_IPV6" "-6"
+
+cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 EOF
