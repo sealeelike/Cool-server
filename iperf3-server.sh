@@ -22,6 +22,8 @@ fi
 PUBLIC_IPV4=$(curl -4 -sf --max-time 5 https://ip.sb\
            || true)
 
+echo"yes"
+
 PUBLIC_IPV6=$(curl -6 -sf --max-time 5 https://api6.ipify.org \
            || curl -6 -sf --max-time 5 https://ip.sb \
            || curl -6 -sf --max-time 5 https://icanhazip.com \
