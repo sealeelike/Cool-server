@@ -65,8 +65,12 @@ done
 # ─── start iperf3 server ──────────────────────────────────────────────────────
 pkill -x iperf3 &>/dev/null || true
 
-iperf3 -s -p "$PORT" &
+# 重定向 iperf3 的 stdout，避免监听信息抢占终端输出
+iperf3 -s -p "$PORT" >/dev/null 2>&1 &
 IPERF_PID=$!
+
+# 等 iperf3 启动完成再打印信息
+sleep 1
 
 trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IPERF_PID 2>/dev/null; echo "[✓] iperf3 stopped."; exit 0' INT TERM HUP
 
@@ -78,6 +82,7 @@ print_pair() {
 
     [[ -n "$PUBLIC_IPV4" ]] && printf 'iperf3 -4 -c %s -p %s %s\n' "$PUBLIC_IPV4" "$PORT" "$args"
     [[ -n "$PUBLIC_IPV6" ]] && printf 'iperf3 -6 -c %s -p %s %s\n' "$PUBLIC_IPV6" "$PORT" "$args"
+    return 0
 }
 
 cat <<EOF
