@@ -1,3 +1,11 @@
+
+
+C:\Users\SeaLee\.qoderworkcn\workspace\mqm4ac1f4y5yjoce\outputs\iperf3-server.sh
+· 文本
+
+
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -62,17 +70,16 @@ while true; do
     fi
 done
 
-# ─── start iperf3 server ──────────────────────────────────────────────────────
+# ─── start iperf3 server (output to temp log first) ──────────────────────────
 pkill -x iperf3 &>/dev/null || true
 
-# 重定向 iperf3 的 stdout，避免监听信息抢占终端输出
-iperf3 -s -p "$PORT" >/dev/null 2>&1 &
+IPERF_LOG=$(mktemp /tmp/iperf3.XXXXXX.log)
+iperf3 -s -p "$PORT" >"$IPERF_LOG" 2>&1 &
 IPERF_PID=$!
 
-# 等 iperf3 启动完成再打印信息
 sleep 1
 
-trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IPERF_PID 2>/dev/null; echo "[✓] iperf3 stopped."; exit 0' INT TERM HUP
+trap 'echo; echo "[*] Stopping iperf3..."; kill $IPERF_PID 2>/dev/null; wait $IPERF_PID 2>/dev/null; rm -f "$IPERF_LOG"; echo "[✓] iperf3 stopped."; exit 0' INT TERM HUP
 
 echo "[✓] iperf3 server started  PID=$IPERF_PID  port=$PORT"
 
@@ -123,5 +130,6 @@ cat <<EOF
 
 EOF
 
-echo "[*] Press Ctrl+C to stop."
-wait $IPERF_PID
+echo "[*] Showing real-time iperf3 log (Ctrl+C to stop)..."
+echo ""
+tail -f "$IPERF_LOG"
